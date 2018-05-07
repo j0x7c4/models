@@ -24,6 +24,7 @@ from absl import app as absl_app
 from absl import flags
 import tensorflow as tf  # pylint: disable=g-bad-import-order
 
+print(tf.__version__)
 from official.utils.flags import core as flags_core
 from official.utils.logs import hooks_helper
 from official.utils.misc import model_helpers
@@ -179,13 +180,27 @@ def input_fn(data_file, num_epochs, shuffle, batch_size):
     labels = features.pop('income_bracket')
     return features, tf.equal(labels, '>50K')
 
+  def data_generator():
+      with open(data_file) as f:
+          for line in f:
+              buf = line.strip().split(',')
+              print(buf)
+              for i, field in enumerate(_CSV_COLUMN_DEFAULTS):
+                  if type(_CSV_COLUMN_DEFAULTS[i][0]) == int:
+                      buf[i] = int(buf[i])
+              features = dict(zip(buf, _CSV_COLUMNS))
+              label = features.pop("income_bracket")
+              yield features, 1 if label == ">50K" else 0
+
   # Extract lines from input files using the Dataset API.
-  dataset = tf.data.TextLineDataset(data_file)
+  # dataset = tf.data.TextLineDataset(data_file)
+  dataset = tf.data.Dataset.from_generator(data_generator, (tf.int64, tf.int64),
+                                           (tf.TensorShape([]), tf.TensorShape([None])))
 
   if shuffle:
     dataset = dataset.shuffle(buffer_size=_NUM_EXAMPLES['train'])
 
-  dataset = dataset.map(parse_csv, num_parallel_calls=5)
+  #dataset = dataset.map(parse_csv, num_parallel_calls=5)
 
   # We call repeat after shuffling, rather than before, to prevent separate
   # epochs from blending together.
