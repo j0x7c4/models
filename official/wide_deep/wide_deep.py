@@ -39,6 +39,43 @@ _CSV_COLUMNS = [
 _CSV_COLUMN_DEFAULTS = [[0], [''], [0], [''], [0], [''], [''], [''], [''], [''],
                         [0], [0], [0], [''], ['']]
 
+sparse_feature_define = {
+    'education': [
+        'Bachelors', 'HS-grad', '11th', 'Masters', '9th', 'Some-college',
+        'Assoc-acdm', 'Assoc-voc', '7th-8th', 'Doctorate', 'Prof-school',
+        '5th-6th', '10th', '1st-4th', 'Preschool', '12th'],
+    "workclass": [
+        'Self-emp-not-inc', 'Private', 'State-gov', 'Federal-gov',
+        'Local-gov', '?', 'Self-emp-inc', 'Without-pay', 'Never-worked']
+}
+
+multi_hot_feature_define = {
+    "workclass": {"th": 3}
+}
+
+tf_feature_shape = {'age': tf.TensorShape([]), 'workclass': tf.TensorShape([9]),
+                    'fnlwgt': tf.TensorShape([]), 'education': tf.TensorShape([]),
+                    'education_num': tf.TensorShape([]),
+                    'marital_status': tf.TensorShape([]), 'occupation': tf.TensorShape([]),
+                    'relationship': tf.TensorShape([]),
+                    'race': tf.TensorShape([]), 'gender': tf.TensorShape([]),
+                    'capital_gain': tf.TensorShape([]), 'capital_loss': tf.TensorShape([]),
+                    'hours_per_week': tf.TensorShape([]),
+                    'native_country': tf.TensorShape([])
+                    }
+
+tf_label_shape = tf.TensorShape([])
+
+tf_feature_type = {'age': tf.int32, 'workclass': tf.string, 'fnlwgt': tf.int64, 'education': tf.string,
+                   'education_num': tf.int32,
+                   'marital_status': tf.string, 'occupation': tf.string, 'relationship': tf.string,
+                   'race': tf.string, 'gender': tf.string,
+                   'capital_gain': tf.int32, 'capital_loss': tf.int32, 'hours_per_week': tf.int32,
+                   'native_country': tf.string
+                   }
+
+tf_label_type = tf.int32
+
 _NUM_EXAMPLES = {
     'train': 32561,
     'validation': 16281,
@@ -164,34 +201,46 @@ def build_estimator(model_dir, model_type):
             dnn_hidden_units=hidden_units,
             config=run_config)
 
-
-def input_fn(data_file, num_epochs, shuffle, batch_size):
+def input_fn(data_file, num_epochs=1, shuffle=True, batch_size=5):
     """Generate an input function for the Estimator."""
     assert tf.gfile.Exists(data_file), (
         '%s not found. Please make sure you have run data_download.py and '
         'set the --data_dir argument to the correct path.' % data_file)
 
+    def padding(a, size, default=None):
+        t = list(a)
+        assert len(t) < size
+        return tuple(t + [default for i in range(size - len(t))])
+
+    def attempt_dict(arr, th=0):
+        ans = []
+        for t in arr:
+            if len(t.split(':')) == 2:
+                tmp = t.split(':')
+                k, v = tmp[0], float(tmp[1])
+                if v > th:
+                    ans.append(k)
+            else:
+                ans.append(t)
+        return ans
+
     def data_generator():
         with open(data_file) as f:
             for line in f:
                 buf = line.strip().split(',')
-                print(buf)
                 for i, field in enumerate(_CSV_COLUMN_DEFAULTS):
                     if type(_CSV_COLUMN_DEFAULTS[i][0]) == int:
                         buf[i] = int(buf[i])
-                features = dict(zip(buf, _CSV_COLUMNS))
+                    elif multi_hot_feature_define.get(_CSV_COLUMNS[i]):
+                        buf[i] = attempt_dict(buf[i][1:-1].split('|'), multi_hot_feature_define.get(_CSV_COLUMNS[i])["th"])
+                        buf[i] = padding(buf[i], len(sparse_feature_define[_CSV_COLUMNS[i]]), default="")
+                features = dict(zip(_CSV_COLUMNS, buf))
                 label = features.pop("income_bracket")
+                print(features)
                 yield features, 1 if label == ">50K" else 0
 
     # from_generator is more flexible
-    dataset = tf.data.Dataset.from_generator(data_generator, (
-        {'age': tf.int32, 'workclass': tf.string, 'fnlwgt': tf.int64, 'education': tf.string,
-         'education_num': tf.int32,
-         'marital_status': tf.string, 'occupation': tf.string, 'relationship': tf.string,
-         'race': tf.string, 'gender': tf.string,
-         'capital_gain': tf.int32, 'capital_loss': tf.int32, 'hours_per_week': tf.int32,
-         'native_country': tf.string
-         }, tf.int64), (tf.TensorShape([]), tf.TensorShape([None])))
+    dataset = tf.data.Dataset.from_generator(data_generator, (tf_feature_type, tf_label_type), (tf_feature_shape, tf_label_shape))
     #
     if shuffle:
         dataset = dataset.shuffle(buffer_size=_NUM_EXAMPLES['train'])
